@@ -1,0 +1,15 @@
+bin/
+obj/
+.vs/
+.idea/
+TestResults/
+*.user
+*.suo
+*.log
+.env
+.env.*
+.workspace/
+pluginConfigs/
+*.db
+*.sqlite
+session.bin
