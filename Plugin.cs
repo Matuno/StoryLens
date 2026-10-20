@@ -1,7 +1,9 @@
 using System.Numerics;
 using Dalamud.Game.ClientState.Conditions;
+using Dalamud.Game.ClientState.Objects.Enums;
 using Dalamud.Game.ClientState.Objects.SubKinds;
 using Dalamud.Game.Command;
+using Dalamud.Game.Gui.ContextMenu;
 using Dalamud.Plugin;
 using Dalamud.Plugin.Services;
 using StoryLens.Core;
@@ -21,6 +23,7 @@ public sealed class Plugin : IDalamudPlugin
     private readonly ICommandManager commands;
     private readonly IPluginLog log;
     private readonly IGameGui gameGui;
+    private readonly IContextMenu contextMenu;
     private readonly StoryLensWindow window;
     private readonly CompanyTracker companyTracker;
     private WorkspaceTests? tests;
@@ -44,11 +47,13 @@ public sealed class Plugin : IDalamudPlugin
     internal bool WorldAvailable { get; private set; }
     internal string Status { get; private set; } = "Waiting for the first game update.";
     internal string? SaveError { get; private set; }
-    internal uint? FocusedQuestId { get; set; }
+    internal int ContextMenuOffers { get; private set; }
+    internal int ContextMenuOpens { get; private set; }
 
     public Plugin(IDalamudPluginInterface pluginInterface, IFramework framework,
         IClientState client, ICondition condition, IObjectTable objects, ITargetManager targets,
-        IDataManager data, ICommandManager commands, IGameGui gameGui, IPluginLog log)
+        IDataManager data, ICommandManager commands, IGameGui gameGui, IPluginLog log, ITextureProvider textures,
+        IContextMenu contextMenu)
     {
         this.pluginInterface = pluginInterface;
         this.framework = framework;
@@ -58,6 +63,7 @@ public sealed class Plugin : IDalamudPlugin
         this.targets = targets;
         this.commands = commands;
         this.gameGui = gameGui;
+        this.contextMenu = contextMenu;
         this.log = log;
         Catalog = new QuestCatalog(data.Excel);
         Progress = new ProgressCatalog(data.Excel, Catalog);
@@ -68,7 +74,7 @@ public sealed class Plugin : IDalamudPlugin
         foreach (var player in Settings.PersistentPlayers())
             Engine.Track(player.Key);
         companyTracker = new CompanyTracker(this);
-        window = new StoryLensWindow(this);
+        window = new StoryLensWindow(this, textures, gameGui);
         try
         {
             commandRegistered = commands.AddHandler(Command, new CommandInfo(OnCommand)
@@ -76,6 +82,7 @@ public sealed class Plugin : IDalamudPlugin
             if (!commandRegistered)
                 throw new InvalidOperationException("Story Lens command is already registered.");
             tests = new WorkspaceTests(pluginInterface, framework, CaptureSmoke);
+            contextMenu.OnMenuOpened += OnMenuOpened;
             framework.Update += Update;
             client.Logout += OnLogout;
             client.TerritoryChanged += OnZoneChanged;
@@ -266,7 +273,10 @@ public sealed class Plugin : IDalamudPlugin
                         continue;
                     var key = identity.Key;
                     var sample = new PlayerSample(player.EntityId, zone, player.Position,
-                        player.OnlineStatus.RowId == Catalog.CutsceneStatusId);
+                        player.OnlineStatus.RowId == Catalog.CutsceneStatusId)
+                    {
+                        InCombat = player.StatusFlags.HasFlag(StatusFlags.InCombat),
+                    };
                     if (!QuestObjective.IsFinite(sample.Position))
                         continue;
                     Seen[key] = sample;
@@ -326,6 +336,41 @@ public sealed class Plugin : IDalamudPlugin
             Pause("Waiting for the new area.");
     }
 
+    private void OnMenuOpened(IMenuOpenedArgs args)
+    {
+        if (!framework.IsInFrameworkUpdateThread || args.Target is not MenuTargetDefault target)
+            return;
+        lock (gate)
+        {
+            if (disposed) return;
+            WatchedPlayer player;
+            if (target.TargetObject is { } obj)
+            {
+                if (obj is not IPlayerCharacter character) return;
+                player = new(character.Name.TextValue.Trim(), character.HomeWorld.RowId);
+            }
+            else player = new(target.TargetName.Trim(), target.TargetHomeWorld.RowId);
+            if (!WatchedPlayer.IsValidName(player.Name) || !Catalog.Worlds.Any(w => w.Id == player.HomeWorldId))
+                return;
+            // Copy identity now: the context target is a native-backed wrapper that expires with the menu.
+            args.AddMenuItem(new MenuItem
+            {
+                Name = "Story Lens",
+                UseDefaultPrefix = true,
+                OnClicked = _ =>
+                {
+                    lock (gate)
+                    {
+                        if (disposed) return;
+                        ContextMenuOpens++;
+                        window.OpenForPlayer(player);
+                    }
+                },
+            });
+            ContextMenuOffers++;
+        }
+    }
+
     private void OnCommand(string command, string arguments) => Open();
     private void Open()
     {
@@ -339,7 +384,7 @@ public sealed class Plugin : IDalamudPlugin
         {
             if (disposed)
                 return;
-            window.DrawMarkers(gameGui);
+            window.DrawMarkers();
             window.Draw();
         }
     }
@@ -351,7 +396,7 @@ public sealed class Plugin : IDalamudPlugin
             var catalogValid = Catalog.Objectives.Length > 0 && Catalog.Objectives.All(o => o.IsValid);
             var chainValid = Catalog.Chain.Quests.Count > 0 && Catalog.Objectives.All(o =>
                 Catalog.Chain.Quests.ContainsKey(o.QuestId)) && Catalog.Chain.Quests.Values.All(q =>
-                q.Id != 0 && !string.IsNullOrWhiteSpace(q.Name) && q.Duties.All(d =>
+                q.Id != 0 && q.IconId > 0 && !string.IsNullOrWhiteSpace(q.Name) && q.Duties.All(d =>
                     !string.IsNullOrWhiteSpace(d.Name) && !string.IsNullOrWhiteSpace(d.Type)));
             var observationsValid = SessionPlayers.Count <= InferenceEngine.MaximumSessionPlayers &&
                 Engine.PlayerCount == SessionPlayers.Count && Seen.All(p =>
@@ -385,6 +430,7 @@ public sealed class Plugin : IDalamudPlugin
                 companyRequestIntervalSeconds = CompanyTracker.RequestIntervalSeconds,
                 companyRetryDelayMinutes = CompanyState.RetryDelayMinutes,
                 worldAvailable = WorldAvailable, observingEnabled = Settings.ObservePlayers,
+                contextMenuOffers = ContextMenuOffers, contextMenuOpens = ContextMenuOpens,
             };
         }
     }
@@ -415,6 +461,7 @@ public sealed class Plugin : IDalamudPlugin
             if (historyDirty)
                 Save();
             disposed = true;
+            contextMenu.OnMenuOpened -= OnMenuOpened;
             companyTracker?.Dispose();
             framework.Update -= Update;
             client.Logout -= OnLogout;

@@ -5,6 +5,7 @@ public enum DutyRelation { Referenced = 1, Unlock = 2, Prerequisite = 4 }
 
 public sealed record QuestDuty(string Key, string Name, string Type, DutyRelation Relations)
 {
+    public uint IconId { get; init; }
     public string Relationship => string.Join(", ", new[]
     {
         Relations.HasFlag(DutyRelation.Referenced) ? "Referenced by quest" : null,
@@ -14,7 +15,25 @@ public sealed record QuestDuty(string Key, string Name, string Type, DutyRelatio
 }
 
 public sealed record QuestInfo(uint Id, string Name, bool IsMainScenario,
-    uint[] PreviousQuestIds, QuestDuty[] Duties);
+    uint[] PreviousQuestIds, QuestDuty[] Duties)
+{
+    public uint IconId { get; init; }
+    public bool IsUnlock { get; init; }
+    public int Level { get; init; }
+    public string TextSheet { get; init; } = string.Empty;
+    public bool HasCutsceneReference { get; init; }
+    public string Kind => IsMainScenario ? "Main scenario" : IsUnlock ? "Unlock quest" : "Side quest";
+}
+
+public sealed record QuestStep(int Index, string Text, QuestObjective[] Locations);
+public sealed record QuestDetails(string Summary, QuestStep[] Steps, bool TextAvailable)
+{
+    public int StepNumber(int todoIndex) => Array.FindIndex(Steps, step => step.Index == todoIndex) + 1;
+
+    public string ProgressLabel(IEnumerable<int> todoIndices) => string.Join(", ", todoIndices
+        .Select(StepNumber).Where(number => number > 0).Distinct().Order()
+        .Select(number => $"{number}/{Steps.Length}"));
+}
 
 public enum ChainStop { Limit, End, Branch, MissingLink, Cycle }
 public sealed record QuestChainPath(QuestInfo[] Quests, QuestInfo[] Branches, ChainStop Stop);

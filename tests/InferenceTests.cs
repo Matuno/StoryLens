@@ -53,6 +53,56 @@ public sealed class InferenceTests
         Assert.Equal(ClueKind.CutscenePresent, Assert.Single(engine.GetClues("member")).Kind);
     }
 
+    [Fact]
+    public void CombatStartsRequireContinuityAndDoNotOverrideCutsceneEvidence()
+    {
+        var engine = new InferenceEngine();
+        engine.Observe("member", Sample(), [Objective(), Objective(2)], Start);
+        var fighting = Sample() with { InCombat = true };
+        engine.Observe("member", fighting, [Objective(), Objective(2)], Start.AddMilliseconds(250));
+        for (var i = 2; i < 8; i++)
+            engine.Observe("member", fighting, [Objective(), Objective(2)], Start.AddMilliseconds(i * 250));
+        Assert.All(engine.GetClues("member", Start.AddSeconds(2)), clue =>
+        {
+            Assert.Equal(ClueKind.EnteredCombat, clue.Kind);
+            Assert.Equal(Start.AddMilliseconds(250), clue.ObservedAt);
+            Assert.Equal(2, clue.MatchingQuestCount);
+        });
+        engine.Observe("member", fighting with { InCutscene = true }, [Objective()], Start.AddSeconds(2));
+        engine.Observe("member", Sample(), [Objective()], Start.AddMilliseconds(2250));
+        engine.Observe("member", fighting, [Objective()], Start.AddMilliseconds(2500));
+        Assert.Equal(ClueKind.EnteredCutscene, engine.GetClues("member", Start.AddSeconds(3))[0].Kind);
+    }
+
+    [Theory]
+    [InlineData("first")]
+    [InlineData("gap")]
+    [InlineData("pause")]
+    [InlineData("jump")]
+    public void StreamingOrDiscontinuityDoesNotInventCombatEntry(string reason)
+    {
+        var engine = new InferenceEngine();
+        if (reason != "first") engine.Observe("member", Sample(), [Objective()], Start);
+        if (reason == "pause") engine.Pause();
+        engine.Observe("member", Sample(position: reason == "jump" ? new Vector3(5, 0, 0) : null) with { InCombat = true },
+            [Objective()], Start.AddMilliseconds(reason == "gap" ? 2000 : 250));
+        Assert.Equal(ClueKind.CombatPresent, Assert.Single(engine.GetClues("member", Start.AddSeconds(3))).Kind);
+    }
+
+    [Fact]
+    public void SavedCluesUseEvidenceStrengthInsteadOfPersistedEnumNumbers()
+    {
+        var cutscene = new Clue(Objective(), ClueKind.EnteredCutscene, Start, 0, 1);
+        var combat = new Clue(Objective(2), ClueKind.EnteredCombat, Start, 0, 1);
+        var session = new SessionPlayer(new WatchedPlayer("Example Member", 1), Start, Sample());
+        var point = LastSeenPoint.Capture(session, [combat, cutscene]);
+        Assert.True(point.IsValid());
+        Assert.Equal(ClueKind.EnteredCutscene, point.Clues[0].Kind);
+        Assert.Equal(ClueKind.EnteredCombat, point.Clues[1].Kind);
+        Assert.Equal(new[] { cutscene, combat },
+            point.ResolveClues(new[] { Objective(), Objective(2) }.ToDictionary(o => o.Key), Start));
+    }
+
     [Theory]
     [InlineData("gap")]
     [InlineData("missing")]

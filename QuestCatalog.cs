@@ -15,9 +15,13 @@ internal sealed class QuestCatalog
     public (uint Id, string Name)[] Worlds { get; }
     public uint CutsceneStatusId { get; }
     private readonly Dictionary<uint, string> territoryNames;
+    private readonly ExcelModule excel;
+    private readonly Dictionary<uint, QuestDetails> details = [];
+    private readonly Dictionary<uint, QuestObjective[]> byQuest;
 
     public QuestCatalog(ExcelModule excel)
     {
+        this.excel = excel;
         var npcs = excel.GetSheet<ENpcResident>()!;
         territoryNames = excel.GetSheet<TerritoryType>()!.ToDictionary(t => t.RowId,
             t => t.PlaceName.ValueNullable?.Name.ExtractText() ?? string.Empty);
@@ -58,12 +62,25 @@ internal sealed class QuestCatalog
                         AddDuty(solo.SoloDuty.ValueNullable, DutyRelation.Referenced);
                     else if (questBattles.TryGetRow(parameter.ScriptArg, out _))
                         duties.TryAdd($"solo/{parameter.ScriptArg}", new QuestDuty($"solo/{parameter.ScriptArg}",
-                            "Solo encounter", "Solo duty", DutyRelation.Referenced));
+                            "Solo encounter", "Solo duty", DutyRelation.Referenced)
+                        {
+                            IconId = excel.GetSheet<ContentType>()!.GetRow(7).Icon,
+                        });
                 }
             }
             questInfo.Add(new QuestInfo(quest.RowId, name, msq,
                 quest.PreviousQuest.Select(p => p.RowId).Where(id => id != 0).Distinct().ToArray(),
-                duties.Values.OrderBy(d => d.Name).ToArray()));
+                duties.Values.OrderBy(d => d.Name).ToArray())
+            {
+                IconId = quest.EventIconType.ValueNullable is { NpcIconAvailable: > 0 } icon
+                    ? icon.NpcIconAvailable + (icon.IconRange > 1 ? 1u : 0u)
+                    : excel.GetSheet<EventIconType>()!.GetRow(msq ? 3u : 1u).NpcIconAvailable + 1,
+                IsUnlock = quest.EventIconType.RowId is 8 or 10,
+                Level = quest.ClassJobLevel[0],
+                TextSheet = $"quest/{(quest.RowId & 0xFFFF) / 100:000}/{quest.Id.ExtractText()}",
+                HasCutsceneReference = quest.QuestParams.Any(p => p.ScriptArg != 0 &&
+                    QuestChain.IsNumberedSymbol(p.ScriptInstruction.ExtractText(), "CUTSCENE")),
+            });
             Add(quest.IssuerLocation, -1, 0);
             for (var i = 0; i < quest.TodoParams.Count; i++)
             {
@@ -102,12 +119,16 @@ internal sealed class QuestCatalog
                 var key = $"duty/{row.RowId}";
                 duties[key] = duties.TryGetValue(key, out var old)
                     ? old with { Relations = old.Relations | relation }
-                    : new QuestDuty(key, dutyName, string.IsNullOrWhiteSpace(dutyType) ? "Duty" : dutyType, relation);
+                    : new QuestDuty(key, dutyName, string.IsNullOrWhiteSpace(dutyType) ? "Duty" : dutyType, relation)
+                    {
+                        IconId = row.ContentType.ValueNullable?.Icon ?? 0,
+                    };
             }
         }
 
         Objectives = objectives.DistinctBy(o => o.Key).ToArray();
         ObjectivesByKey = Objectives.ToDictionary(o => o.Key);
+        byQuest = Objectives.GroupBy(o => o.QuestId).ToDictionary(g => g.Key, g => g.ToArray());
         Chain = new QuestChain(questInfo);
         Quests = Objectives.DistinctBy(o => o.QuestId).OrderBy(o => o.QuestName).ToArray();
         ByTerritory = Objectives.GroupBy(o => o.TerritoryId).ToDictionary(g => g.Key, g => g.ToArray());
@@ -121,6 +142,32 @@ internal sealed class QuestCatalog
     }
 
     public QuestObjective[] InTerritory(uint territory) => ByTerritory.GetValueOrDefault(territory) ?? [];
+    public QuestObjective[] InQuest(uint id) => byQuest.GetValueOrDefault(id) ?? [];
+
+    public QuestDetails Details(uint id)
+    {
+        if (details.TryGetValue(id, out var cached)) return cached;
+        var quest = Chain.Quests[id];
+        var text = new Dictionary<string, string>();
+        if (excel.SheetNames.Contains(quest.TextSheet))
+        {
+            var sheet = excel.GetRawSheet(quest.TextSheet);
+            if (sheet is not null)
+                foreach (var row in new ExcelSheet<RawRow>(sheet))
+                    text[row.ReadStringColumn(0).ExtractText()] = row.ReadStringColumn(1).ExtractText().Trim();
+        }
+        var prefix = "TEXT_" + quest.TextSheet.Split('/')[^1].ToUpperInvariant();
+        var locations = InQuest(id);
+        var steps = new List<QuestStep> { new(-1, "Accept the quest", locations.Where(o => o.TodoIndex < 0).ToArray()) };
+        for (var index = 0; index < 24; index++)
+        {
+            var label = text.GetValueOrDefault($"{prefix}_TODO_{index:00}");
+            var points = locations.Where(o => o.TodoIndex == index).ToArray();
+            if (!string.IsNullOrWhiteSpace(label) || points.Length > 0)
+                steps.Add(new(index, string.IsNullOrWhiteSpace(label) ? $"Objective {index + 1}" : label, points));
+        }
+        return details[id] = new(text.GetValueOrDefault($"{prefix}_SEQ_00") ?? string.Empty, steps.ToArray(), text.Count > 0);
+    }
     public string WorldName(uint id) => Worlds.FirstOrDefault(w => w.Id == id).Name ?? id.ToString();
     public string TerritoryName(uint id) => territoryNames.TryGetValue(id, out var name) && name.Length > 0
         ? name : $"Area {id}";

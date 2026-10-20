@@ -29,7 +29,7 @@ internal sealed class CompanyTracker : IDisposable
         http = new HttpClient(new HttpClientHandler { AllowAutoRedirect = false, UseCookies = false,
             AutomaticDecompression = DecompressionMethods.All })
         { BaseAddress = new Uri("https://na.finalfantasyxiv.com"), Timeout = TimeSpan.FromSeconds(20), MaxResponseContentBufferSize = 4_000_000 };
-        http.DefaultRequestHeaders.UserAgent.ParseAdd("StoryLens/0.2 (+https://na.finalfantasyxiv.com/lodestone/)");
+        http.DefaultRequestHeaders.UserAgent.ParseAdd("StoryLens/1.0 (+https://github.com/Matuno/StoryLens)");
     }
 
     public void Update(DateTimeOffset now, WatchedPlayer? local, bool inCombat, bool inDuty)

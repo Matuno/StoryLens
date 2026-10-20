@@ -79,6 +79,20 @@ public sealed class LastSeenTests
         Assert.Single(point.Clues);
     }
 
+    [Theory]
+    [InlineData(1, ClueKind.EnteredCutscene)]
+    [InlineData(21, ClueKind.Nearby)]
+    public void FreshProximityAfterReloadPreservesRecentStrongerEvidenceUntilItAgesOut(int minutes, ClueKind expected)
+    {
+        var now = Start.AddMinutes(minutes);
+        var session = new SessionPlayer(Member, now, Sample);
+        var clue = new Clue(Objective, ClueKind.Nearby, now, 1, 1);
+        var point = LastSeenPoint.Capture(session, [clue], Point());
+        var saved = Assert.Single(point.Clues);
+        Assert.Equal(expected, saved.Kind);
+        Assert.Equal(minutes == 1 ? Start : now, saved.ObservedAt);
+    }
+
     [Fact]
     public void InvalidPersistedPointsAreRejected()
     {

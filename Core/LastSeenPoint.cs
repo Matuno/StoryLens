@@ -17,9 +17,10 @@ public sealed record LastSeenPoint(DateTimeOffset LastSeenAt, Zone Zone, Vector3
     public static LastSeenPoint Capture(SessionPlayer player, IEnumerable<Clue> clues, LastSeenPoint? previous = null)
     {
         var merged = clues.Select(SavedClue.From).Concat(previous?.Clues ?? [])
-            .Where(c => c.ObservedAt <= player.LastSeenAt).DistinctBy(c => c.ObjectiveKey())
+            .Where(c => c.ObservedAt <= player.LastSeenAt)
             .OrderByDescending(c => player.LastSeenAt - c.ObservedAt < InferenceEngine.RecentWindow)
-            .ThenByDescending(c => c.Kind).ThenByDescending(c => c.ObservedAt)
+            .ThenByDescending(c => Clue.Strength(c.Kind)).ThenByDescending(c => c.ObservedAt)
+            .DistinctBy(c => c.ObjectiveKey())
             .Take(InferenceEngine.MaximumCluesPerPlayer).ToArray();
         return new(player.LastSeenAt, player.Sample.Zone, player.Sample.Position, merged);
     }

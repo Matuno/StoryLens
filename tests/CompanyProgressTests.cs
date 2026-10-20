@@ -41,6 +41,15 @@ public sealed class CompanyProgressTests
         Assert.Null(Story.Estimate(p, [], null, null, Now.AddDays(4)).Ceiling);
     }
 
+    [Theory]
+    [InlineData(ClueKind.CombatPresent)]
+    [InlineData(ClueKind.EnteredCombat)]
+    public void UnattributedCombatDoesNotEstablishAnMsqProgressPercentage(ClueKind kind)
+    {
+        var clue = new Clue(new(1, "Start", true, 1, 0, 1, 1, 1, Vector3.Zero, ""), kind, Now, 0, 1);
+        Assert.Equal("Unknown", Story.Estimate(null, [clue], null, null, Now).Label);
+    }
+
     [Fact]
     public void LocationCanAdvanceAnEstimateButIsNeverACompletionFloor()
     {

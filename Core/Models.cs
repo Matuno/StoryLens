@@ -26,15 +26,30 @@ public sealed record QuestObjective(uint QuestId, string QuestName, bool IsMainS
 }
 
 public readonly record struct Zone(uint TerritoryId, uint MapId, uint Instance);
-public sealed record PlayerSample(uint EntityId, Zone Zone, Vector3 Position, bool InCutscene);
-public enum ClueKind { Nearby, Lingered, CutscenePresent, EnteredCutscene }
+public sealed record PlayerSample(uint EntityId, Zone Zone, Vector3 Position, bool InCutscene)
+{
+    public bool InCombat { get; init; }
+}
+// Existing numeric values are persisted in saved clues.
+public enum ClueKind { Nearby = 0, Lingered = 1, CutscenePresent = 2, EnteredCutscene = 3, CombatPresent = 4, EnteredCombat = 5 }
 public sealed record Clue(QuestObjective Objective, ClueKind Kind, DateTimeOffset ObservedAt,
     float Distance, int MatchingQuestCount)
 {
+    public static int Strength(ClueKind kind) => kind switch
+    {
+        ClueKind.EnteredCutscene => 4,
+        ClueKind.CutscenePresent => 3,
+        ClueKind.EnteredCombat => 2,
+        ClueKind.Lingered or ClueKind.CombatPresent => 1,
+        _ => 0,
+    };
+
     public string Description => Kind switch
     {
-        ClueKind.EnteredCutscene => "Observed entering a cutscene nearby",
-        ClueKind.CutscenePresent => "Seen in a cutscene nearby (start unknown)",
+        ClueKind.EnteredCutscene => "Viewing Cutscene status began nearby",
+        ClueKind.CutscenePresent => "Viewing Cutscene status seen nearby (start unknown)",
+        ClueKind.EnteredCombat => "Combat began nearby; cause unknown",
+        ClueKind.CombatPresent => "Seen in combat nearby; cause unknown",
         ClueKind.Lingered => "Spent at least 8 seconds nearby",
         _ => "Seen near this objective",
     };

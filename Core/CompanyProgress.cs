@@ -85,7 +85,8 @@ public sealed class StoryProgress
     {
         var lower = profile?.CompletedQuestIds.Where(Quests.ContainsKey).OrderByDescending(id => indices[id]).Cast<uint?>().FirstOrDefault();
         var observation = clues.Where(c => c.Objective.IsMainScenario && Quests.ContainsKey(c.Objective.QuestId) &&
-            c.Kind >= ClueKind.Lingered && c.MatchingQuestCount == 1).FirstOrDefault();
+            c.Kind is ClueKind.Lingered or ClueKind.CutscenePresent or ClueKind.EnteredCutscene &&
+            c.MatchingQuestCount == 1).FirstOrDefault();
         var ceilingQuest = profile is { MaxCombatLevel: > 0 } && now - profile.JobsCheckedAt < TimeSpan.FromDays(3)
             ? ordered.FirstOrDefault(q => q.Level > profile.MaxCombatLevel) : null;
         var ceiling = ceilingQuest is null ? null : $"Level ceiling: before {ceilingQuest.Name} ({Label(ceilingQuest.Id, false)}), highest combat job {profile!.MaxCombatLevel} as of {profile.JobsCheckedAt:u}";

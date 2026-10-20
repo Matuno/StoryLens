@@ -61,6 +61,8 @@ public sealed class InferenceEngine
         // An already-set status after streaming/zoning is not an observed cutscene start.
         var entered = continuous && !previous!.InCutscene && sample.InCutscene &&
             Vector3.Distance(previous.Position, sample.Position) <= 3f;
+        var enteredCombat = continuous && !previous!.InCombat && sample.InCombat &&
+            Vector3.Distance(previous.Position, sample.Position) <= 3f;
         var matches = objectives.Where(o => Matches(o, sample)).DistinctBy(o => o.Key).ToArray();
         var questCount = matches.Select(o => o.QuestId).Distinct().Count();
         var matchingKeys = matches.Select(o => o.Key).ToHashSet();
@@ -72,8 +74,10 @@ public sealed class InferenceEngine
             if (!state.NearSince.TryGetValue(objective.Key, out var since))
                 state.NearSince[objective.Key] = since = now;
             var kind = entered ? ClueKind.EnteredCutscene : sample.InCutscene ? ClueKind.CutscenePresent :
+                enteredCombat ? ClueKind.EnteredCombat : sample.InCombat ? ClueKind.CombatPresent :
                 now - since >= TimeSpan.FromSeconds(8) ? ClueKind.Lingered : ClueKind.Nearby;
-            if (!state.Clues.TryGetValue(objective.Key, out var old) || kind >= old.Kind || now - old.ObservedAt >= RecentWindow)
+            if (!state.Clues.TryGetValue(objective.Key, out var old) ||
+                Clue.Strength(kind) >= Clue.Strength(old.Kind) || now - old.ObservedAt >= RecentWindow)
                 state.Clues[objective.Key] = new Clue(objective, kind, now,
                     Vector3.Distance(objective.Position, sample.Position), questCount);
         }
@@ -90,7 +94,7 @@ public sealed class InferenceEngine
 
     public static Clue[] Rank(IEnumerable<Clue> clues, DateTimeOffset now) => clues
         .OrderByDescending(c => c.ObservedAt <= now && now - c.ObservedAt < RecentWindow)
-        .ThenByDescending(c => c.Kind).ThenByDescending(c => c.ObservedAt).ToArray();
+        .ThenByDescending(c => Clue.Strength(c.Kind)).ThenByDescending(c => c.ObservedAt).ToArray();
 
     public void Track(string playerKey)
     {
