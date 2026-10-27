@@ -13,3 +13,12 @@ pluginConfigs/
 *.db
 *.sqlite
 session.bin
+
+# Project docs and unit tests stay in the local development workspace.
+/docs/
+/tests/
+/*.development/
+/AGENTS.md
+/CONTRACT.md
+/CONTRIBUTING.md
+/EVIDENCE.md

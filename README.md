@@ -28,4 +28,4 @@ FC members and manually tracked players keep a local last-seen record. Observati
 2. Enable the repository and save. Open **Plugin Installer**, search for **Story Lens**, and select **Install**.
 3. Open `/storylens`, or right-click a player and choose **Story Lens**.
 
-By Matuno. Developed with substantial OpenAI Codex assistance; logo generated with AI. [Build from source](CONTRIBUTING.md) · [AGPL-3.0 license](LICENSE).
+By Matuno. Developed with substantial OpenAI Codex assistance; logo generated with AI. [AGPL-3.0 license](LICENSE).

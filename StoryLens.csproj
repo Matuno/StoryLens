@@ -10,8 +10,4 @@
     <IsPackable>false</IsPackable>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
-  <ItemGroup>
-    <Compile Remove="tests\**\*.cs" />
-    <None Remove="tests\**\*" />
-  </ItemGroup>
 </Project>
