@@ -1,5 +1,7 @@
 # Story Lens
 
+<img src="assets/logo.png" alt="Story Lens: an open book and a quest path inside a lens" width="160" height="160">
+
 A Dalamud plugin for getting a rough picture of your Free Company's story progress and following a player's likely MSQ or sidequest steps.
 
 ## What it does
@@ -26,4 +28,4 @@ FC members and manually tracked players keep a local last-seen record. Observati
 2. Enable the repository and save. Open **Plugin Installer**, search for **Story Lens**, and select **Install**.
 3. Open `/storylens`, or right-click a player and choose **Story Lens**.
 
-Developed with substantial OpenAI Codex assistance. [Build from source](CONTRIBUTING.md) · [AGPL-3.0 license](LICENSE).
+By Matuno. Developed with substantial OpenAI Codex assistance; logo generated with AI. [Build from source](CONTRIBUTING.md) · [AGPL-3.0 license](LICENSE).

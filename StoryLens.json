@@ -1,9 +1,10 @@
 {
-  "Author": "Detle",
+  "Author": "Matuno",
   "Name": "Story Lens",
   "RepoUrl": "https://github.com/Matuno/StoryLens",
+  "IconUrl": "https://raw.githubusercontent.com/Matuno/DalamudPlugins/main/plugins/StoryLens/icon.png",
   "Punchline": "Quest markers and estimated Free Company MSQ progress.",
-  "Description": "Tracks Free Company story clues using world observations and paced public Lodestone profile checks, with saved last-seen points and quest-chain previews.",
+  "Description": "Tracks Free Company story clues using world observations and paced public Lodestone profile checks, with saved last-seen points and quest-chain previews. The logo is AI-generated.",
   "ApplicableVersion": "any",
   "Tags": [
     "quests",

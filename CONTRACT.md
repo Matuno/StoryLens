@@ -1,13 +1,13 @@
 # Story Lens contract
 
-Status: **ACTIVE / maintained, version 1.0.1.0** in `projects/active/StoryLens`. Owner: Detle. Public source: https://github.com/Matuno/StoryLens. Historical verification sections retain their status at the time; the 2026-10-20 promotion record supersedes those incubator labels.
+Status: **ACTIVE / maintained, version 1.0.2.0** in `projects/active/StoryLens`. Owner: Matuno. Public source: https://github.com/Matuno/StoryLens. Historical verification sections retain their status at the time; the 2026-10-20 promotion record supersedes those incubator labels.
 
 Registry, automation and report paths refer to the development workspace. The public repository builds independently; [CONTRIBUTING.md](CONTRIBUTING.md) provides standalone commands.
 
 ## Identity and purpose
 
 - Internal name: `StoryLens`
-- Owner: Detle
+- Owner: Matuno
 - Purpose: Shows quest objective overlays and uncertain story-progress clues for visible players, with persistent last-seen points for manually tracked players and the full Free Company roster.
 
 ## Inputs and triggers
@@ -49,7 +49,7 @@ The `smoke` gate accepts only `smoke`, bounds requests to 32 KiB, and marshals c
 - Catalog: all named quests with nonempty internal IDs; issuer locations plus all nonzero valid TODO Level references. Display numbering follows the objective list, starting with quest acceptance as step 1 and including text-only steps. World labels append step/total without distance; shared locations retain all applicable step numbers. Underlying TODO indices remain unchanged. Completion sequence is stored as metadata and is not presented as another player's current sequence.
 - `Level.X/Y/Z`, `Territory` and `Map` supply world coordinates and scope. NPC labels resolve type-8 objects through `ENpcResident`. Story phasing never controls whether an overlay may be shown.
 - MSQ browsing classification uses `JournalGenre.Icon == 61412`, checked against the installed data. This filter affects only the quest browser, not world markers or ambiguity calculations. World markers include all nearby quest types unless StorySelection.QuestId holds an explicitly selected quest; an inferred quest while following a player does not narrow them. Clearing or toggling off the quest immediately restores the full nearby set.
-- Quest icon type comes from `Quest.EventIconType`: `NpcIconAvailable + 1` for icon ranges, otherwise its sole icon. Blue unlock rows are 8/10. Missing icon metadata falls back to the installed MSQ/normal type rows (3/1). No icon asset is distributed with the plugin.
+- Quest icon type comes from `Quest.EventIconType`: `NpcIconAvailable + 1` for icon ranges, otherwise its sole icon. Blue unlock rows are 8/10. Missing icon metadata falls back to the installed MSQ/normal type rows (3/1). No game quest icon asset is distributed with the plugin.
 - Quest details lazily read the installed `quest/{low-16-bit quest ID / 100:000}/{Quest.Id}` text sheet. Exact `TEXT_{internal ID}_SEQ_00` and `_TODO_{index:00}` keys provide the summary and objective labels; unknown text falls back to numbered locations. Text-only steps remain visible. These are static quest instructions, not another player's current journal text.
 - Objective highlights use the latest non-future evidence timestamp for that quest. A visible player matching those locations within the 20-minute evidence window supports **Possible now**; otherwise it is **Last match**, with current step unknown. Multiple matching steps or quests stay explicitly ambiguous. Earlier steps are never marked complete. Unlock-based minimum progress alone does not select a current objective.
 - The cutscene online status is resolved by the English `OnlineStatus` label `Viewing Cutscene` from installed sheets. Missing/ambiguous status metadata fails plugin initialization; there is no guessed offset or raw native fallback.
@@ -81,6 +81,12 @@ Compare cutscene transitions/markers with actual steps, verify overlapping/floor
 - [x] The DLL passed dev-plugin loading, its registered read-only live test and targeted log check before promotion.
 - [x] The maintainer personally reported working in-game markers and rapid quest inference, reviewed the subsequent UI work, and explicitly requested promotion on 2026-10-20. This acceptance covers the documented behavior and known limits; it does not assert that every native/UI scenario has been manually exercised.
 - [x] Promotion moved the directory and updated the existing registry entry in a rollback-safe operation, without adding a duplicate entry; the saved registry passes its JSON schema.
+
+### Branding update (2026-10-27)
+
+Version 1.0.2.0 adds a transparent 512-pixel logo to the public README and custom plugin listing, and credits Matuno in the manifest and assembly metadata. The README and plugin description disclose the AI-generated logo. Tracking behavior, configuration schema and native-access boundaries are unchanged.
+
+Release/staging builds, package checks and all 99 tests passed in each channel. The Debug DLL reloaded on Dalamud 15.0.3.9 with matching SHA-256 `3afe415137619d562bcf5e702232752cb5adc09be0c2fcde2af9076fc302350c`, passed the read-only smoke test and produced zero targeted log errors. The logo's dimensions, transparency and appearance were checked; its live Plugin Installer display was not manually checked.
 
 ### Development review (2026-10-27)
 
