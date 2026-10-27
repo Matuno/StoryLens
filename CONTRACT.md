@@ -2,7 +2,7 @@
 
 Status: **ACTIVE / maintained, version 1.0.1.0** in `projects/active/StoryLens`. Owner: Detle. Public source: https://github.com/Matuno/StoryLens. Historical verification sections retain their status at the time; the 2026-10-20 promotion record supersedes those incubator labels.
 
-Registry, automation and report paths refer to the development workspace. The public repository builds independently; its README provides standalone commands.
+Registry, automation and report paths refer to the development workspace. The public repository builds independently; [CONTRIBUTING.md](CONTRIBUTING.md) provides standalone commands.
 
 ## Identity and purpose
 
