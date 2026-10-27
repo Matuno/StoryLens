@@ -61,6 +61,25 @@ public sealed class CompanyProgressTests
     }
 
     [Fact]
+    public void AreaCluesDoNotHideContradictoryLevelEvidence()
+    {
+        var profile = new ProfileEvidence { MaxCombatLevel = 72, JobsCheckedAt = Now, CompletedQuestIds = [3] };
+        var estimate = Story.Estimate(profile, [], 4, "Later area", Now);
+        Assert.True(estimate.Conflict);
+        Assert.EndsWith("?", estimate.Label);
+    }
+
+    [Fact]
+    public void FutureObservationsAndLevelsDoNotEstablishCurrentProgress()
+    {
+        var profile = new ProfileEvidence { MaxCombatLevel = 72, JobsCheckedAt = Now.AddMinutes(1) };
+        var clue = new Clue(new(2, "Middle", true, 1, 0, 1, 1, 1, Vector3.Zero, ""), ClueKind.EnteredCutscene, Now.AddMinutes(1), 0, 1);
+        var estimate = Story.Estimate(profile, [clue], null, null, Now);
+        Assert.Equal("Unknown", estimate.Label);
+        Assert.Null(estimate.Ceiling);
+    }
+
+    [Fact]
     public void QueueFinishesPartialMemberAndOnlyRevisitsStaleProfiles()
     {
         var a = new CompanyMember { Profile = new() { NextSection = 1 } };

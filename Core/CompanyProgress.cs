@@ -84,10 +84,10 @@ public sealed class StoryProgress
         uint? areaQuest, string? areaName, DateTimeOffset now)
     {
         var lower = profile?.CompletedQuestIds.Where(Quests.ContainsKey).OrderByDescending(id => indices[id]).Cast<uint?>().FirstOrDefault();
-        var observation = clues.Where(c => c.Objective.IsMainScenario && Quests.ContainsKey(c.Objective.QuestId) &&
+        var observation = clues.Where(c => c.ObservedAt <= now && c.Objective.IsMainScenario && Quests.ContainsKey(c.Objective.QuestId) &&
             c.Kind is ClueKind.Lingered or ClueKind.CutscenePresent or ClueKind.EnteredCutscene &&
             c.MatchingQuestCount == 1).FirstOrDefault();
-        var ceilingQuest = profile is { MaxCombatLevel: > 0 } && now - profile.JobsCheckedAt < TimeSpan.FromDays(3)
+        var ceilingQuest = profile is { MaxCombatLevel: > 0 } && profile.JobsCheckedAt <= now && now - profile.JobsCheckedAt < TimeSpan.FromDays(3)
             ? ordered.FirstOrDefault(q => q.Level > profile.MaxCombatLevel) : null;
         var ceiling = ceilingQuest is null ? null : $"Level ceiling: before {ceilingQuest.Name} ({Label(ceilingQuest.Id, false)}), highest combat job {profile!.MaxCombatLevel} as of {profile.JobsCheckedAt:u}";
         var conflict = lower.HasValue && ceilingQuest is not null && indices[lower.Value] >= indices[ceilingQuest.Id];
@@ -96,11 +96,10 @@ public sealed class StoryProgress
                 conflict || ceilingQuest is not null && indices[observation.Objective.QuestId] >= indices[ceilingQuest.Id], observation.Objective.QuestId);
         if (areaQuest.HasValue && Quests.ContainsKey(areaQuest.Value) && (!lower.HasValue || indices[areaQuest.Value] > indices[lower.Value]))
             return new(Label(areaQuest.Value, false) + " ?", $"Area clue: {areaName}. Access/revisits do not identify the current quest." +
-                (lower.HasValue ? $" Unlock floor: {Label(lower.Value, true)}." : ""), ceiling, false, areaQuest);
+                (lower.HasValue ? $" Unlock floor: {Label(lower.Value, true)}." : ""), ceiling,
+                conflict || ceilingQuest is not null && indices[areaQuest.Value] >= indices[ceilingQuest.Id], areaQuest);
         if (lower.HasValue)
             return new(Label(lower.Value, true) + " +", $"At least through {Quests[lower.Value].Name}; public unlock/achievement evidence", ceiling, conflict, lower);
-        if (areaQuest.HasValue && Quests.ContainsKey(areaQuest.Value))
-            return new(Label(areaQuest.Value, false) + " ?", $"Area clue: {areaName}. Access/revisits do not identify the current quest.", ceiling, false, areaQuest);
         return new("Unknown", "No quest or progression unlock evidence yet.", ceiling, false, null);
     }
 }

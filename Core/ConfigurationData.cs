@@ -31,8 +31,10 @@ public class ConfigurationData
             Company.Members.Select(m => m.Player.Key).Distinct().Count() != Company.Members.Count ||
             Company.Members.Select(m => m.LodestoneId).Distinct().Count() != Company.Members.Count ||
             (Company.Id.Length > 0 && !LodestoneParser.ValidId(Company.Id)) ||
-            (Company.CharacterId.Length > 0 && !LodestoneParser.ValidId(Company.CharacterId)) ||
-            LastSeen.Any(p => !PersistentPlayers().Any(w => w.Key == p.Key) || p.Value is null || !p.Value.IsValid()))
+            (Company.CharacterId.Length > 0 && !LodestoneParser.ValidId(Company.CharacterId)))
+            throw new InvalidDataException("Story Lens configuration is invalid; preserve it for manual recovery.");
+        var persistentKeys = PersistentPlayers().Select(p => p.Key).ToHashSet();
+        if (LastSeen.Any(p => !persistentKeys.Contains(p.Key) || p.Value is null || !p.Value.IsValid()))
             throw new InvalidDataException("Story Lens configuration is invalid; preserve it for manual recovery.");
         Version = 3;
     }

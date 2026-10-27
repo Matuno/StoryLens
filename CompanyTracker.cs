@@ -4,13 +4,13 @@ using StoryLens.Core;
 
 namespace StoryLens;
 
-internal sealed class CompanyTracker : IDisposable
+internal sealed class CompanyTracker : IAsyncDisposable
 {
     public const int RequestIntervalSeconds = 5;
     private readonly Plugin plugin;
     private readonly HttpClient http;
     private readonly CancellationTokenSource stop = new();
-    private Task<string>? pending;
+    private Task<LodestonePage>? pending;
     private Request? request;
     private readonly List<RosterEntry> roster = [];
     private int rosterPage = 1;
@@ -30,6 +30,7 @@ internal sealed class CompanyTracker : IDisposable
             AutomaticDecompression = DecompressionMethods.All })
         { BaseAddress = new Uri("https://na.finalfantasyxiv.com"), Timeout = TimeSpan.FromSeconds(20), MaxResponseContentBufferSize = 4_000_000 };
         http.DefaultRequestHeaders.UserAgent.ParseAdd("StoryLens/1.0 (+https://github.com/Matuno/StoryLens)");
+        http.DefaultRequestHeaders.AcceptLanguage.ParseAdd("en");
     }
 
     public void Update(DateTimeOffset now, WatchedPlayer? local, bool inCombat, bool inDuty)
@@ -47,9 +48,9 @@ internal sealed class CompanyTracker : IDisposable
         {
             try
             {
-                var html = pending.GetAwaiter().GetResult();
+                var page = pending.GetAwaiter().GetResult();
                 if (request!.Owner == local.Key && request.Owner == state.OwnerKey && request.Company == state.Id)
-                    Apply(request, html, now);
+                    Apply(request, page, now);
             }
             catch (Exception e) when (e is HttpRequestException or TaskCanceledException or InvalidDataException or InvalidOperationException or
                 FormatException or OverflowException or System.Text.RegularExpressions.RegexMatchTimeoutException)
@@ -66,7 +67,7 @@ internal sealed class CompanyTracker : IDisposable
                 roster.Clear(); rosterPage = rosterLastPage = 1;
                 plugin.MarkHistoryDirty();
             }
-            pending = null; request = null;
+            finally { pending = null; request = null; }
         }
         if (state.OwnerKey != local.Key)
         {
@@ -131,45 +132,46 @@ internal sealed class CompanyTracker : IDisposable
             kind = new[] { "class_job", "mount", "minion", "achievement/category/76" }[member.Profile.NextSection];
             path = $"/lodestone/character/{member.LodestoneId}/{kind}/"; memberKey = member.Player.Key;
         }
-        request = new(state.OwnerKey, state.Id, path, kind, memberKey);
+        var job = new Request(state.OwnerKey, state.Id, path, kind, memberKey);
+        request = job;
         state.NextRequestAt = now.AddSeconds(RequestIntervalSeconds);
         plugin.MarkHistoryDirty();
         Requests++;
         Status = kind == "roster" ? $"Reading roster page {rosterPage}/{rosterLastPage}…" : "Checking one stale public profile page…";
-        pending = Fetch(path);
+        var worldName = plugin.Catalog.WorldName(local.HomeWorldId);
+        pending = Task.Run(() => Fetch(job, local.Name, worldName), stop.Token);
     }
 
-    private async Task<string> Fetch(string path)
+    private async Task<LodestonePage> Fetch(Request job, string name, string world)
     {
-        using var response = await http.GetAsync(path, stop.Token).ConfigureAwait(false);
+        using var response = await http.GetAsync(job.Path, stop.Token).ConfigureAwait(false);
         var html = await response.Content.ReadAsStringAsync(stop.Token).ConfigureAwait(false);
-        if (!response.IsSuccessStatusCode)
+        var parts = job.Path.Split('/');
+        var privateSection = parts.Length > 4 && parts[2] == "character" && response.Headers.RetryAfter is null &&
+            LodestoneParser.IsPrivateCharacterPage((int)response.StatusCode, html, parts[3]);
+        if (!response.IsSuccessStatusCode && !privateSection)
         {
-            // Lodestone serves private sections as 403 with the requested character's ordinary profile frame.
-            var parts = path.Split('/');
-            if (parts.Length > 4 && parts[2] == "character" && response.Headers.RetryAfter is null &&
-                LodestoneParser.IsPrivateCharacterPage((int)response.StatusCode, html, parts[3])) return html;
             var error = new HttpRequestException("Lodestone response unavailable", null, response.StatusCode);
             if (response.Headers.RetryAfter?.Date is { } date) error.Data["RetryAt"] = date;
             else if (response.Headers.RetryAfter?.Delta is { } delay) error.Data["RetryAt"] = DateTimeOffset.UtcNow.Add(delay);
             throw error;
         }
-        return html;
+        stop.Token.ThrowIfCancellationRequested();
+        var parsed = LodestoneParser.ParsePage(html, job.Kind, job.Kind == "roster" ? job.Company : parts[3], name, world);
+        stop.Token.ThrowIfCancellationRequested();
+        return parsed;
     }
 
-    private void Apply(Request job, string html, DateTimeOffset now)
+    private void Apply(Request job, LodestonePage page, DateTimeOffset now)
     {
         var state = plugin.Settings.Company;
         if (job.Kind == "search")
         {
-            var split = state.OwnerKey.LastIndexOf('@');
-            state.CharacterId = LodestoneParser.FindCharacter(html, state.OwnerKey[..split], plugin.Catalog.WorldName(uint.Parse(state.OwnerKey[(split + 1)..])));
+            state.CharacterId = page.Id;
         }
         else if (job.Kind == "company")
         {
-            LodestoneParser.VerifyCharacter(html, state.CharacterId);
-            state.Id = LodestoneParser.CompanyId(html);
-            if (state.Id.Length > 0 && !LodestoneParser.ValidId(state.Id)) throw new InvalidDataException("Invalid company link");
+            state.Id = page.Id;
             if (state.Id.Length == 0)
             {
                 Status = "No public Free Company link; waiting for the in-game member list or a later profile refresh.";
@@ -178,21 +180,18 @@ internal sealed class CompanyTracker : IDisposable
         }
         else if (job.Kind == "roster")
         {
-            if (!LodestoneParser.MainContent(html).Contains($"/lodestone/freecompany/{state.Id}/", StringComparison.Ordinal))
-                throw new InvalidDataException("Wrong Free Company page");
-            var page = LodestoneParser.Roster(html);
-            if (page.CurrentPage != rosterPage || (rosterPage > 1 && page.LastPage != rosterLastPage) ||
-                (page.CurrentPage < page.LastPage && page.Members.Length != 50))
+            var rosterResult = page.Roster!;
+            if (rosterResult.CurrentPage != rosterPage || (rosterPage > 1 && rosterResult.LastPage != rosterLastPage) ||
+                (rosterResult.CurrentPage < rosterResult.LastPage && rosterResult.Members.Length != 50))
                 throw new InvalidDataException("Roster pagination changed during scan");
-            rosterLastPage = page.LastPage;
-            roster.AddRange(page.Members);
+            rosterLastPage = rosterResult.LastPage;
+            roster.AddRange(rosterResult.Members);
             if (rosterPage < rosterLastPage) rosterPage++;
             else
             {
-                var entries = roster.DistinctBy(m => m.Id).ToArray();
-                if (entries.Length is 0 or > 512 || entries.Length != roster.Count) throw new InvalidDataException("Invalid or changing company roster");
+                LodestoneParser.ValidateRoster(roster);
                 var members = new List<CompanyMember>();
-                foreach (var entry in entries)
+                foreach (var entry in roster)
                 {
                     var world = plugin.Catalog.Worlds.SingleOrDefault(w => w.Name.Equals(entry.World, StringComparison.OrdinalIgnoreCase)).Id;
                     if (!WatchedPlayer.IsValidName(entry.Name) || world == 0) throw new InvalidDataException("Invalid company identity");
@@ -210,28 +209,27 @@ internal sealed class CompanyTracker : IDisposable
         }
         else if (state.Members.FirstOrDefault(m => m.Player.Key == job.MemberKey) is { } member)
         {
-            LodestoneParser.VerifyCharacter(html, member.LodestoneId);
             var profile = member.Profile;
-            try
+            if (!page.Unavailable)
             {
                 if (job.Kind == "class_job")
                 {
-                    profile.MaxCombatLevel = LodestoneParser.MaxCombatLevel(html);
+                    profile.MaxCombatLevel = page.MaxCombatLevel;
                     profile.JobsCheckedAt = now;
                 }
                 else if (job.Kind is "mount" or "minion")
                 {
-                    var icons = LodestoneParser.CollectionIcons(html, job.Kind);
+                    var icons = page.Icons!;
                     foreach (var rule in plugin.Progress.Collections.Where(r => r.Kind == job.Kind && icons.Contains(r.IconHash)))
                         AddEvidence(rule.QuestId, $"{rule.Kind}: {rule.Name}");
                 }
                 else
-                    foreach (var id in LodestoneParser.Achievements(html))
+                    foreach (var id in page.Achievements!)
                         if (plugin.Progress.AchievementQuests.TryGetValue(id, out var quest)) AddEvidence(quest, $"Achievement: {plugin.Progress.Story.Quests[quest].Name}");
                 profile.Status = "Public evidence checked; missing unlocks do not imply incomplete quests";
                 profile.SectionStatus[job.Kind] = "Public page checked";
             }
-            catch (InvalidDataException)
+            else
             {
                 profile.Status = $"{job.Kind}: private, incomplete or changed page; earlier evidence retained";
                 profile.SectionStatus[job.Kind] = "Private, incomplete or changed page";
@@ -246,10 +244,11 @@ internal sealed class CompanyTracker : IDisposable
         plugin.MarkHistoryDirty();
     }
 
-    public void Dispose()
+    public async ValueTask DisposeAsync()
     {
         stop.Cancel();
-        try { pending?.GetAwaiter().GetResult(); } catch (Exception) { }
-        http.Dispose(); stop.Dispose();
+        try { if (pending is not null) await pending.ConfigureAwait(false); }
+        catch (Exception) { /* Worker failures are reported while running; shutdown only drains it. */ }
+        finally { http.Dispose(); stop.Dispose(); }
     }
 }

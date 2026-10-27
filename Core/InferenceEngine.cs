@@ -27,8 +27,8 @@ public sealed class InferenceEngine
         QuestObjective.IsFinite(sample.Position) && objective.TerritoryId == sample.Zone.TerritoryId &&
         objective.MapId == sample.Zone.MapId &&
         Math.Abs(objective.Position.Y - sample.Position.Y) <= HeightTolerance &&
-        Vector2.Distance(new(objective.Position.X, objective.Position.Z),
-            new(sample.Position.X, sample.Position.Z)) <= MatchRadius;
+        Vector2.DistanceSquared(new(objective.Position.X, objective.Position.Z),
+            new(sample.Position.X, sample.Position.Z)) <= MatchRadius * MatchRadius;
 
     public string? Observe(string playerKey, PlayerSample sample, IEnumerable<QuestObjective> objectives, DateTimeOffset now)
     {
@@ -60,9 +60,9 @@ public sealed class InferenceEngine
 
         // An already-set status after streaming/zoning is not an observed cutscene start.
         var entered = continuous && !previous!.InCutscene && sample.InCutscene &&
-            Vector3.Distance(previous.Position, sample.Position) <= 3f;
+            Vector3.DistanceSquared(previous.Position, sample.Position) <= 9f;
         var enteredCombat = continuous && !previous!.InCombat && sample.InCombat &&
-            Vector3.Distance(previous.Position, sample.Position) <= 3f;
+            Vector3.DistanceSquared(previous.Position, sample.Position) <= 9f;
         var matches = objectives.Where(o => Matches(o, sample)).DistinctBy(o => o.Key).ToArray();
         var questCount = matches.Select(o => o.QuestId).Distinct().Count();
         var matchingKeys = matches.Select(o => o.Key).ToHashSet();

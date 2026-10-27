@@ -10,14 +10,15 @@ internal sealed class QuestCatalog
     public QuestObjective[] Objectives { get; }
     public IReadOnlyDictionary<string, QuestObjective> ObjectivesByKey { get; }
     public IReadOnlyDictionary<uint, QuestObjective[]> ByTerritory { get; }
-    public QuestObjective[] Quests { get; }
     public QuestChain Chain { get; }
     public (uint Id, string Name)[] Worlds { get; }
+    public IReadOnlySet<uint> WorldIds { get; }
     public uint CutsceneStatusId { get; }
     private readonly Dictionary<uint, string> territoryNames;
     private readonly ExcelModule excel;
     private readonly Dictionary<uint, QuestDetails> details = [];
     private readonly Dictionary<uint, QuestObjective[]> byQuest;
+    private readonly Dictionary<uint, string> worldNames;
 
     public QuestCatalog(ExcelModule excel)
     {
@@ -130,10 +131,11 @@ internal sealed class QuestCatalog
         ObjectivesByKey = Objectives.ToDictionary(o => o.Key);
         byQuest = Objectives.GroupBy(o => o.QuestId).ToDictionary(g => g.Key, g => g.ToArray());
         Chain = new QuestChain(questInfo);
-        Quests = Objectives.DistinctBy(o => o.QuestId).OrderBy(o => o.QuestName).ToArray();
         ByTerritory = Objectives.GroupBy(o => o.TerritoryId).ToDictionary(g => g.Key, g => g.ToArray());
         Worlds = excel.GetSheet<World>()!.Where(w => w.IsPublic)
             .Select(w => (w.RowId, w.Name.ExtractText())).OrderBy(w => w.Item2).ToArray();
+        WorldIds = Worlds.Select(w => w.Id).ToHashSet();
+        worldNames = Worlds.ToDictionary(w => w.Id, w => w.Name);
         // Resolve the public status from the installed data; fail closed if its meaning changes.
         CutsceneStatusId = excel.GetSheet<OnlineStatus>(Lumina.Data.Language.English)!
             .Single(s => s.Name.ExtractText() == "Viewing Cutscene").RowId;
@@ -168,7 +170,7 @@ internal sealed class QuestCatalog
         }
         return details[id] = new(text.GetValueOrDefault($"{prefix}_SEQ_00") ?? string.Empty, steps.ToArray(), text.Count > 0);
     }
-    public string WorldName(uint id) => Worlds.FirstOrDefault(w => w.Id == id).Name ?? id.ToString();
+    public string WorldName(uint id) => worldNames.GetValueOrDefault(id) ?? id.ToString(System.Globalization.CultureInfo.InvariantCulture);
     public string TerritoryName(uint id) => territoryNames.TryGetValue(id, out var name) && name.Length > 0
         ? name : $"Area {id}";
     public bool HasTerritory(uint id) => territoryNames.TryGetValue(id, out var name) && name.Length > 0;

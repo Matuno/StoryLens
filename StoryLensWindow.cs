@@ -27,6 +27,11 @@ internal sealed class StoryLensWindow(Plugin plugin, ITextureProvider textures, 
     private string anchorLabel = string.Empty;
     private DateTimeOffset nextCompanyEstimate;
     private Dictionary<string, ProgressEstimate> companyEstimates = [];
+    private List<CompanyMember>? companyRoster;
+    private string? lastCompanySearch;
+    private CompanyMember[] companyRows = [];
+    private (Zone, Vector3, uint?)? markerKey;
+    private (QuestObjective Objective, string Label)[] markers = [];
     private (string, bool, uint)? browseKey;
     private QuestInfo[] browseQuests = [];
     private static readonly Vector4 Accent = new(.40f, .87f, .79f, 1f);
@@ -35,12 +40,18 @@ internal sealed class StoryLensWindow(Plugin plugin, ITextureProvider textures, 
 
     private void RefreshSelection()
     {
+        if (selection.PlayerKey is null)
+        {
+            member = null; evidence = []; estimate = null; candidates = [];
+            anchor = null; focused = selection.ResolveQuest(null);
+            return;
+        }
         member = plugin.Settings.PersistentPlayers().FirstOrDefault(p => p.Key == selection.PlayerKey) ??
             (selection.PlayerKey is { } key ? plugin.SessionPlayers.GetValueOrDefault(key)?.Player : null) ??
             (contextPlayer?.Key == selection.PlayerKey ? contextPlayer : null);
         if (selection.PlayerKey is not null && member is null) selection.ClearPlayer();
         evidence = member is null ? [] : plugin.GetEvidence(member.Key);
-        estimate = member is null ? null : plugin.Estimate(member.Key);
+        estimate = member is null ? null : plugin.Estimate(member.Key, evidence: evidence);
         candidates = QuestCandidate.Resolve(evidence, member is null ? null : plugin.Seen.GetValueOrDefault(member.Key), DateTimeOffset.UtcNow);
         if (selection.CandidateId is { } selected && !candidates.Any(c => c.QuestId == selected)) selection.ClearQuest();
         var clue = candidates.FirstOrDefault();
@@ -101,8 +112,10 @@ internal sealed class StoryLensWindow(Plugin plugin, ITextureProvider textures, 
             ImGui.SetNextWindowFocus();
             focusRequested = false;
         }
-        if (ImGui.Begin("Story Lens###StoryLens", ref IsOpen))
+        var visible = ImGui.Begin("Story Lens###StoryLens", ref IsOpen);
+        try
         {
+            if (!visible) return;
             RefreshSelection();
             ImGui.TextColored(Accent, "STORY LENS");
             ImGui.SameLine(); Badge("STORY COMPANION", new Vector4(.64f, .70f, .83f, 1));
@@ -113,25 +126,25 @@ internal sealed class StoryLensWindow(Plugin plugin, ITextureProvider textures, 
                 ImGui.TextWrapped(plugin.SaveError);
                 if (ImGui.SmallButton("Retry save")) plugin.Save();
             }
-            if (ImGui.BeginTabBar("StoryLensTabs"))
+            using var tabs = ImRaii.TabBar("StoryLensTabs");
+            if (tabs)
             {
                 Tab("Free Company", DrawCompany);
                 Tab("Follow player", DrawFollow);
                 Tab("Quest browser", DrawBrowser);
                 Tab("Settings", DrawSettings);
-                ImGui.EndTabBar();
             }
         }
-        ImGui.End();
+        finally { ImGui.End(); }
     }
 
     private void Tab(string title, Action draw)
     {
         var flags = requestedTab == title ? ImGuiTabItemFlags.SetSelected : ImGuiTabItemFlags.None;
-        if (!ImGui.BeginTabItem(title, flags)) return;
+        using var tab = ImRaii.TabItem(title, flags);
+        if (!tab) return;
         if (requestedTab == title) requestedTab = null;
         draw();
-        ImGui.EndTabItem();
     }
 
     private void DrawSelectionBar()
@@ -176,71 +189,83 @@ internal sealed class StoryLensWindow(Plugin plugin, ITextureProvider textures, 
 
     private void DrawCompany()
     {
-        if (DateTimeOffset.UtcNow >= nextCompanyEstimate || companyEstimates.Count != plugin.Settings.Company.Members.Count)
+        if (DateTimeOffset.UtcNow >= nextCompanyEstimate || companyRoster != plugin.Settings.Company.Members || lastCompanySearch != companySearch)
         {
             nextCompanyEstimate = DateTimeOffset.UtcNow.AddSeconds(1);
-            companyEstimates = plugin.Settings.Company.Members.ToDictionary(m => m.Player.Key, m => plugin.Estimate(m.Player.Key));
+            companyRoster = plugin.Settings.Company.Members;
+            lastCompanySearch = companySearch;
+            companyEstimates = companyRoster.ToDictionary(m => m.Player.Key, m => plugin.Estimate(m.Player.Key, m));
+            companyRows = companyRoster.Where(m => m.Player.Name.Contains(companySearch, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(m => m.Player.Name).ToArray();
         }
         var known = companyEstimates.Values.Count(e => e.QuestId.HasValue);
-        if (ImGui.BeginTable("##OverviewCards", 3, ImGuiTableFlags.SizingStretchSame))
+        using (var cards = ImRaii.Table("##OverviewCards", 3, ImGuiTableFlags.SizingStretchSame))
+        if (cards)
         {
             StatCard("FC MEMBERS", plugin.Settings.Company.Members.Count, new Vector4(.64f, .70f, .93f, 1));
             StatCard("WITH STORY CLUES", known, Accent);
             StatCard("AWAITING EVIDENCE", plugin.Settings.Company.Members.Count - known, Gold);
-            ImGui.EndTable();
         }
         ImGui.TextWrapped(plugin.CompanyTracker.Status);
         ImGui.TextDisabled("~ observed estimate    + known minimum    ? area clue    |    Click a member to follow their path.");
         Search("Find FC member", ref companySearch);
-        if (ImGui.BeginTable("##Company", 3, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH |
-                ImGuiTableFlags.ScrollY | ImGuiTableFlags.Resizable, new Vector2(0, ImGui.GetContentRegionAvail().Y)))
+        using var table = ImRaii.Table("##Company", 3, ImGuiTableFlags.RowBg | ImGuiTableFlags.BordersInnerH |
+                ImGuiTableFlags.ScrollY | ImGuiTableFlags.Resizable, new Vector2(0, ImGui.GetContentRegionAvail().Y));
+        if (table)
         {
             ImGui.TableSetupColumn("Member", ImGuiTableColumnFlags.WidthStretch, 1.2f);
             ImGui.TableSetupColumn("Rough story progress", ImGuiTableColumnFlags.WidthStretch, 1f);
             ImGui.TableSetupColumn("Last observed", ImGuiTableColumnFlags.WidthStretch, 1f);
             ImGui.TableSetupScrollFreeze(0, 1);
             ImGui.TableHeadersRow();
-            foreach (var entry in plugin.Settings.Company.Members.OrderBy(m => m.Player.Name))
+            var clipper = ImGui.ImGuiListClipper();
+            try
             {
-                if (!entry.Player.Name.Contains(companySearch, StringComparison.OrdinalIgnoreCase)) continue;
-                var progress = companyEstimates.GetValueOrDefault(entry.Player.Key);
-                ImGui.TableNextRow(); ImGui.TableNextColumn();
-                if (ImGui.Selectable($"{entry.Player.Name}##fc{entry.Player.Key}", selection.PlayerKey == entry.Player.Key))
-                    SelectPlayer(entry.Player.Key, true);
-                ImGui.TableNextColumn();
-                if (progress?.QuestId is { } quest)
-                {
-                    using var tone = ImRaii.PushColor(ImGuiCol.Text, progress.Label.EndsWith('+') ? Accent : progress.Label.EndsWith('?') ? Gold : new Vector4(.63f, .75f, 1f, 1));
-                    if (ImGui.Selectable($"{progress.Label}##progress{entry.Player.Key}"))
-                    {
-                        if (selection.PlayerKey != entry.Player.Key) SelectPlayer(entry.Player.Key);
-                        selection.ToggleQuest(quest); requestedTab = "Follow player";
-                    }
-                    if (ImGui.IsItemHovered()) ImGui.SetTooltip(progress.Basis);
-                }
-                else ImGui.TextDisabled("Unknown");
-                ImGui.TableNextColumn();
-                var point = plugin.GetLastSeen(entry.Player.Key);
-                ImGui.TextUnformatted(plugin.Seen.ContainsKey(entry.Player.Key) ? "Visible now" : point is not null
-                    ? $"{point.LastSeenAt:MM-dd HH:mm} UTC" : entry.LocationSeenAt != default
-                        ? $"{entry.LocationSeenAt:MM-dd HH:mm} UTC (FC cache)" : "Not observed");
+                clipper.Begin(companyRows.Length);
+                while (clipper.Step())
+                    for (var row = clipper.DisplayStart; row < clipper.DisplayEnd; row++) DrawCompanyRow(companyRows[row]);
             }
-            ImGui.EndTable();
+            finally { clipper.Destroy(); }
         }
+    }
+
+    private void DrawCompanyRow(CompanyMember entry)
+    {
+        var progress = companyEstimates.GetValueOrDefault(entry.Player.Key);
+        ImGui.TableNextRow(); ImGui.TableNextColumn();
+        if (ImGui.Selectable($"{entry.Player.Name}##fc{entry.Player.Key}", selection.PlayerKey == entry.Player.Key))
+            SelectPlayer(entry.Player.Key, true);
+        ImGui.TableNextColumn();
+        if (progress?.QuestId is { } quest)
+        {
+            using var tone = ImRaii.PushColor(ImGuiCol.Text, progress.Label.EndsWith('+') ? Accent : progress.Label.EndsWith('?') ? Gold : new Vector4(.63f, .75f, 1f, 1));
+            if (ImGui.Selectable($"{progress.Label}##progress{entry.Player.Key}"))
+            {
+                if (selection.PlayerKey != entry.Player.Key) SelectPlayer(entry.Player.Key);
+                selection.ToggleQuest(quest); requestedTab = "Follow player";
+            }
+            if (ImGui.IsItemHovered()) ImGui.SetTooltip(progress.Basis);
+        }
+        else ImGui.TextDisabled("Unknown");
+        ImGui.TableNextColumn();
+        var point = plugin.GetLastSeen(entry.Player.Key);
+        ImGui.TextUnformatted(plugin.Seen.ContainsKey(entry.Player.Key) ? "Visible now" : point is not null
+            ? $"{point.LastSeenAt:MM-dd HH:mm} UTC" : entry.LocationSeenAt != default
+                ? $"{entry.LocationSeenAt:MM-dd HH:mm} UTC (FC cache)" : "Not observed");
     }
 
     private void DrawFollow()
     {
-        ImGui.BeginDisabled(plugin.Target is null);
+        using (ImRaii.Disabled(plugin.Target is null))
         if (ImGui.Button("Monitor target") && plugin.Target is { } target)
         {
             addError = plugin.Settings.PersistentPlayers().Any(p => p.Key == target.Key) ? null : plugin.AddPlayer(target.Name, target.HomeWorldId);
             if (addError is null && selection.PlayerKey != target.Key) SelectPlayer(target.Key);
         }
-        ImGui.EndDisabled();
         ImGui.SameLine();
         ImGui.SetNextItemWidth(Math.Max(200, ImGui.GetContentRegionAvail().X));
-        if (ImGui.BeginCombo("##PlayerPicker", member?.Name ?? "Choose a player"))
+        using (var picker = ImRaii.Combo("##PlayerPicker", member?.Name ?? "Choose a player"))
+        if (picker)
         {
             Search("Find player", ref playerSearch);
             if (ImGui.Selectable("None — clear player", selection.PlayerKey is null)) { selection.ClearPlayer(); RefreshSelection(); }
@@ -249,7 +274,6 @@ internal sealed class StoryLensWindow(Plugin plugin, ITextureProvider textures, 
                          .OrderBy(p => p.Name).Take(200))
                 if (ImGui.Selectable($"{player.Name} @ {plugin.Catalog.WorldName(player.HomeWorldId)}##pick{player.Key}", selection.PlayerKey == player.Key))
                     SelectPlayer(player.Key);
-            ImGui.EndCombo();
         }
         if (ImGui.CollapsingHeader("Add a player by name")) DrawAddPlayer();
         if (addError is not null) ImGui.TextWrapped(addError);
@@ -280,9 +304,11 @@ internal sealed class StoryLensWindow(Plugin plugin, ITextureProvider textures, 
         }
         ImGui.TextWrapped("Each is a possibility. Select one to center its path and inspect its steps; select it again to clear.");
         var height = Math.Clamp(ImGui.GetContentRegionAvail().Y * .30f, 80 * Scale, 155 * Scale);
-        if (ImGui.BeginChild("##Candidates", new Vector2(0, height), true))
+        using var child = ImRaii.Child("##Candidates", new Vector2(0, height), true);
+        if (child)
         {
-            if (ImGui.BeginTable("##CandidateChoices", Math.Min(2, candidates.Length), ImGuiTableFlags.SizingStretchSame))
+            using var choices = ImRaii.Table("##CandidateChoices", Math.Min(2, candidates.Length), ImGuiTableFlags.SizingStretchSame);
+            if (choices)
             {
                 foreach (var candidate in candidates)
                 {
@@ -299,21 +325,19 @@ internal sealed class StoryLensWindow(Plugin plugin, ITextureProvider textures, 
                     ImGui.TextWrapped($"{candidate.Evidence.ObservedAt:MM-dd HH:mm} UTC · " +
                         (candidate.Evidence.MatchingQuestCount > 1 ? $"shared by {candidate.Evidence.MatchingQuestCount} quests" : "one known quest fits"));
                 }
-                ImGui.EndTable();
             }
         }
-        ImGui.EndChild();
     }
 
     private void DrawAddPlayer()
     {
         ImGui.InputText("Full character name", ref name, 65);
-        if (ImGui.BeginCombo("Home world", world == 0 ? "Choose a world" : plugin.Catalog.WorldName(world)))
+        using (var worlds = ImRaii.Combo("Home world", world == 0 ? "Choose a world" : plugin.Catalog.WorldName(world)))
+        if (worlds)
         {
             if (ImGui.Selectable("None", world == 0)) world = 0;
             foreach (var w in plugin.Catalog.Worlds)
                 if (ImGui.Selectable(w.Name, world == w.Id)) world = world == w.Id ? 0 : w.Id;
-            ImGui.EndCombo();
         }
         if (ImGui.Button("Track player"))
         {
@@ -341,10 +365,11 @@ internal sealed class StoryLensWindow(Plugin plugin, ITextureProvider textures, 
     private static void DrawPanes(Action left, Action right)
     {
         var width = Math.Max(245, ImGui.GetContentRegionAvail().X * .40f);
-        if (ImGui.BeginChild("##PathPane", new Vector2(width, 0), true)) left();
-        ImGui.EndChild(); ImGui.SameLine();
-        if (ImGui.BeginChild("##DetailPane", new Vector2(0, 0), true)) right();
-        ImGui.EndChild();
+        using (var pane = ImRaii.Child("##PathPane", new Vector2(width, 0), true))
+            if (pane) left();
+        ImGui.SameLine();
+        using (var pane = ImRaii.Child("##DetailPane", new Vector2(0, 0), true))
+            if (pane) right();
     }
 
     private void DrawRoad(uint? root, string label)
@@ -371,7 +396,7 @@ internal sealed class StoryLensWindow(Plugin plugin, ITextureProvider textures, 
     {
         var origin = ImGui.GetCursorScreenPos();
         var inset = 18 * Scale;
-        ImGui.Indent(inset);
+        using var indent = ImRaii.PushIndent(inset, scaled: false);
         var style = ImGui.GetStyle();
         var innerWidth = Math.Max(40, ImGui.GetContentRegionAvail().X - style.WindowPadding.X * 2);
         var titleHeight = Math.Max(26 * Scale, ImGui.CalcTextSize(quest.Name, false, Math.Max(40, innerWidth - 36 * Scale)).Y);
@@ -381,16 +406,16 @@ internal sealed class StoryLensWindow(Plugin plugin, ITextureProvider textures, 
             titleHeight + dutyHeight + style.ItemSpacing.Y * (1 + quest.Duties.Length) + 2 * Scale;
         using (ImRaii.PushColor(ImGuiCol.ChildBg, current ? new Vector4(.10f, .20f, .23f, 1) : new Vector4(.09f, .115f, .15f, 1)))
         {
-            if (ImGui.BeginChild($"##RoadCard{quest.Id}", new Vector2(0, height), true, ImGuiWindowFlags.NoScrollbar))
+            using var card = ImRaii.Child($"##RoadCard{quest.Id}", new Vector2(0, height), true, ImGuiWindowFlags.NoScrollbar);
+            if (card)
             {
                 using (ImRaii.PushColor(ImGuiCol.Text, current ? Accent : ImGui.GetStyle().Colors[(int)ImGuiCol.TextDisabled]))
                     ImGui.TextWrapped(label);
                 QuestRow(quest, $"road{quest.Id}");
                 foreach (var duty in quest.Duties) DrawDuty(duty);
             }
-            ImGui.EndChild();
         }
-        ImGui.Unindent(inset);
+        indent.Dispose();
         ImGui.Spacing();
         var end = ImGui.GetCursorScreenPos();
         var draw = ImGui.GetWindowDrawList();
@@ -428,24 +453,25 @@ internal sealed class StoryLensWindow(Plugin plugin, ITextureProvider textures, 
         var next = ImGui.GetCursorScreenPos();
         ImGui.SetCursorScreenPos(origin); Icon(quest.IconId, iconSize);
         ImGui.SetCursorScreenPos(origin + new Vector2(iconSize + 10 * Scale, 0));
-        ImGui.PushTextWrapPos(ImGui.GetCursorPosX() + textWidth);
-        ImGui.TextUnformatted(quest.Name); ImGui.PopTextWrapPos();
+        using (ImRaii.TextWrapPos(ImGui.GetCursorPosX() + textWidth))
+            ImGui.TextUnformatted(quest.Name);
         ImGui.SetCursorScreenPos(next);
         if (hovered) ImGui.SetTooltip($"{quest.Kind} / Level {quest.Level}\n{(candidate ? "Click to center the path on this possibility" : "Click to preview")}; click again to clear.");
     }
 
     private void DrawDuty(QuestDuty duty)
     {
-        ImGui.BeginGroup();
-        if (duty.IconId != 0) Icon(duty.IconId, 22 * Scale);
-        else
+        using (ImRaii.Group())
         {
-            using var font = ImRaii.PushFont(UiBuilder.IconFont);
-            ImGui.TextUnformatted(FontAwesomeIcon.Dungeon.ToIconString());
+            if (duty.IconId != 0) Icon(duty.IconId, 22 * Scale);
+            else
+            {
+                using var font = ImRaii.PushFont(UiBuilder.IconFont);
+                ImGui.TextUnformatted(FontAwesomeIcon.Dungeon.ToIconString());
+            }
+            ImGui.SameLine();
+            ImGui.TextWrapped(duty.Name);
         }
-        ImGui.SameLine();
-        ImGui.TextWrapped(duty.Name);
-        ImGui.EndGroup();
         if (ImGui.IsItemHovered()) ImGui.SetTooltip($"{duty.Type}\n{duty.Relationship}");
     }
 
@@ -618,42 +644,50 @@ internal sealed class StoryLensWindow(Plugin plugin, ITextureProvider textures, 
     private static void StatCard(string label, int count, Vector4 color)
     {
         ImGui.TableNextColumn();
-        if (ImGui.BeginChild($"##{label}", new Vector2(0, 78 * Scale), true, ImGuiWindowFlags.NoScrollbar))
+        using var card = ImRaii.Child($"##{label}", new Vector2(0, 78 * Scale), true, ImGuiWindowFlags.NoScrollbar);
+        if (card)
         {
             ImGui.TextColored(color, count.ToString());
             ImGui.TextDisabled(label);
         }
-        ImGui.EndChild();
     }
 
     public void DrawMarkers()
     {
-        RefreshSelection();
         if (!plugin.Settings.ShowMarkers || !plugin.WorldAvailable || gameGui.GameUiHidden) return;
-        var objectives = plugin.Catalog.InTerritory(plugin.CurrentZone.TerritoryId)
-            .Where(o => o.MapId == plugin.CurrentZone.MapId &&
-                (selection.QuestId is not { } id || o.QuestId == id) &&
-                Vector3.Distance(o.Position, plugin.LocalPosition) <= 150f)
-            .GroupBy(o => (o.QuestId, o.LevelId))
-            .OrderBy(g => Vector3.DistanceSquared(g.First().Position, plugin.LocalPosition)).Take(32);
+        var key = (plugin.CurrentZone, plugin.LocalPosition, selection.QuestId);
+        if (markerKey != key)
+        {
+            markerKey = key;
+            markers = plugin.Catalog.InTerritory(plugin.CurrentZone.TerritoryId)
+                .Where(o => o.MapId == plugin.CurrentZone.MapId &&
+                    (selection.QuestId is not { } id || o.QuestId == id) &&
+                    Vector3.DistanceSquared(o.Position, plugin.LocalPosition) <= 150f * 150f)
+                .GroupBy(o => (o.QuestId, o.LevelId))
+                .OrderBy(g => Vector3.DistanceSquared(g.First().Position, plugin.LocalPosition)).Take(32)
+                .Select(g =>
+                {
+                    var objective = g.First();
+                    var progress = plugin.Catalog.Details(objective.QuestId).ProgressLabel(g.Select(o => o.TodoIndex));
+                    return (objective, $"{objective.QuestName} ({progress})");
+                }).ToArray();
+        }
         var draw = ImGui.GetBackgroundDrawList();
         var occupied = new List<Vector2>();
         var size = 32 * ImGui.GetFontSize() / 17f;
         // shortcut: overlays have no wall occlusion; add depth checks if hidden markers become distracting.
-        foreach (var group in objectives)
+        foreach (var marker in markers)
         {
-            var objective = group.First();
+            var objective = marker.Objective;
             if (!gameGui.WorldToScreen(objective.Position + Vector3.UnitY * 1.5f, out var screen) ||
                 occupied.Any(p => Vector2.DistanceSquared(p, screen) < size * size)) continue;
             occupied.Add(screen);
             var icon = plugin.Catalog.Chain.Quests[objective.QuestId].IconId;
             if (textures.TryGetFromGameIcon(icon, out var shared) && shared.TryGetWrap(out var texture, out _))
                 draw.AddImage(texture.Handle, screen - new Vector2(size / 2), screen + new Vector2(size / 2));
-            var progress = plugin.Catalog.Details(objective.QuestId).ProgressLabel(group.Select(o => o.TodoIndex));
-            var label = $"{objective.QuestName} ({progress})";
             var textPos = screen + new Vector2(size / 2 + 4, -ImGui.GetTextLineHeight() / 2);
-            draw.AddText(textPos + Vector2.One, 0xFF000000, label);
-            draw.AddText(textPos, 0xFFEEEEEE, label);
+            draw.AddText(textPos + Vector2.One, 0xFF000000, marker.Label);
+            draw.AddText(textPos, 0xFFEEEEEE, marker.Label);
         }
     }
 }

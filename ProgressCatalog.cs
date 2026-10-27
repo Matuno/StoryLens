@@ -34,7 +34,7 @@ internal sealed class ProgressCatalog
         };
         Story = new StoryProgress(quests.Where(q => q.JournalGenre.ValueNullable?.Icon == 61412 &&
                 !q.Id.IsEmpty && stages.ContainsKey(q.JournalGenre.RowId))
-            .Select(q => new StoryQuest(q.RowId, q.Name.ExtractText(), stages[q.JournalGenre.RowId].Stage,
+            .Select(q => new StoryQuest(q.RowId, catalog.Chain.Quests.GetValueOrDefault(q.RowId)?.Name ?? q.Name.ExtractText(), stages[q.JournalGenre.RowId].Stage,
                 stages[q.JournalGenre.RowId].Name, (int)q.JournalGenre.RowId * 10000 + q.SortKey, q.ClassJobLevel[0])));
         AchievementQuests = excel.GetSheet<Achievement>(Language.English)!
             .Where(a => a.Description.ExtractText().StartsWith("Complete the main scenario quest “", StringComparison.Ordinal) && Story.Quests.ContainsKey(a.Key.RowId))

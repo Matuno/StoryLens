@@ -54,16 +54,63 @@ public sealed class LodestoneParserTests
     [InlineData("0")]
     [InlineData("")]
     [InlineData("123?foo=bar")]
-    public void IdsCannotEscapeTheFixedLodestoneEndpoint(string id) => Assert.False(LodestoneParser.ValidId(id));
+    [InlineData(null)]
+    public void IdsCannotEscapeTheFixedLodestoneEndpoint(string? id) => Assert.False(LodestoneParser.ValidId(id));
 
     [Fact]
     public void PrivateAchievement403IsDistinguishedFromRateLimitsAndGenericBlocks()
     {
-        const string profile = "<p class=\"frame__chara__name\">Example Member</p><a href=\"/lodestone/character/123/\">Character</a>";
+        var profile = Profile("123");
         Assert.True(LodestoneParser.IsPrivateCharacterPage(403, profile, "123"));
         Assert.False(LodestoneParser.IsPrivateCharacterPage(429, profile, "123"));
         Assert.False(LodestoneParser.IsPrivateCharacterPage(403, "Request blocked", "123"));
         Assert.False(LodestoneParser.IsPrivateCharacterPage(403, profile, "456"));
         Assert.Throws<InvalidDataException>(() => LodestoneParser.Achievements(profile));
+    }
+
+    private static string Profile(string id) => $"<a href=\"/lodestone/character/{id}/\" class=\"frame__chara__link state_btn\"><p class=\"frame__chara__name\">Example Member</p></a>";
+
+    [Fact]
+    public void AnUnrelatedCharacterLinkCannotAuthorizeTheWrongProfile()
+    {
+        var wrong = Profile("456") + "<a href=\"/lodestone/character/123/\">Other member</a>";
+        Assert.Throws<InvalidDataException>(() => LodestoneParser.VerifyCharacter(wrong, "123"));
+        Assert.False(LodestoneParser.IsPrivateCharacterPage(403, wrong, "123"));
+        Assert.Throws<InvalidDataException>(() => LodestoneParser.ParsePage(wrong, "mount", "123", "", ""));
+    }
+
+    [Fact]
+    public void WorkerParsingKeepsUnavailableSectionsDistinctFromEmptyPublicCollections()
+    {
+        Assert.True(LodestoneParser.ParsePage(Profile("123"), "mount", "123", "", "").Unavailable);
+        var empty = LodestoneParser.ParsePage(Profile("123") + "<ul class=\"js__mount_list\"></ul>", "mount", "123", "", "");
+        Assert.False(empty.Unavailable);
+        Assert.Empty(empty.Icons!);
+        Assert.Throws<InvalidOperationException>(() => LodestoneParser.ParsePage(Profile("123"), "unknown", "123", "", ""));
+    }
+
+    [Theory]
+    [InlineData("123", "Example Member", "Louisoix")]
+    [InlineData("456", "EXAMPLE MEMBER", "louisoix")]
+    [InlineData("0", "Other Member", "Louisoix")]
+    [InlineData("456", "Invalid", "Louisoix")]
+    public void InvalidOrDuplicateEntriesCannotReplaceACompleteRoster(string id, string name, string world)
+    {
+        var entries = new[] { new RosterEntry("123", "Example Member", "Louisoix"), new RosterEntry(id, name, world) };
+        Assert.Throws<InvalidDataException>(() => LodestoneParser.ValidateRoster(entries));
+        string Entry(RosterEntry entry) => $"<a href=\"/lodestone/character/{entry.Id}/\" class=\"entry__bg\"><p class=\"entry__name\">{entry.Name}</p><p class=\"entry__world\">{entry.World}</p></a>";
+        Assert.Throws<InvalidDataException>(() => LodestoneParser.Roster(
+            "<li class=\"btn__pager__current\">Page 1 of 1</li>" + string.Concat(entries.Select(Entry))));
+    }
+
+    [Fact]
+    public void APartiallyParsedLastPageCannotSilentlyDropARosterMember()
+    {
+        const string html = """
+            <li class="btn__pager__current">Page 1 of 1</li>
+            <a href="/lodestone/character/123/" class="entry__bg"><p class="entry__name">Example Member</p><p class="entry__world">Louisoix</p></a>
+            <a href="/lodestone/character/456/" class="entry__bg"><p class="entry__name">Other Member</p></a>
+            """;
+        Assert.Throws<InvalidDataException>(() => LodestoneParser.Roster(html));
     }
 }

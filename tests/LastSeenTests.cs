@@ -100,6 +100,7 @@ public sealed class LastSeenTests
         Assert.False((Point() with { LastSeenAt = default }).IsValid());
         Assert.False((Point() with { Clues = [Point().Clues[0] with { Kind = (ClueKind)99 }] }).IsValid());
         Assert.False((Point() with { Clues = [Point().Clues[0] with { ObservedAt = Start.AddMinutes(1) }] }).IsValid());
+        Assert.False((Point() with { Clues = [Point().Clues[0], Point().Clues[0]] }).IsValid());
         var settings = new ConfigurationData { Version = 999, Players = [Member] };
         Assert.Throws<InvalidDataException>(() => settings.Validate(new HashSet<uint> { 39 }));
         Assert.Equal(999, settings.Version);

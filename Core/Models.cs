@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Globalization;
 
 namespace StoryLens.Core;
 
@@ -6,7 +7,7 @@ public sealed record WatchedPlayer(string Name, uint HomeWorldId)
 {
     public string Key => MakeKey(Name, HomeWorldId);
 
-    public static string MakeKey(string name, uint world) => $"{name.Trim().ToUpperInvariant()}@{world}";
+    public static string MakeKey(string name, uint world) => string.Create(CultureInfo.InvariantCulture, $"{name.Trim().ToUpperInvariant()}@{world}");
 
     public static bool IsValidName(string? name) => !string.IsNullOrWhiteSpace(name) &&
         name.Trim().Length <= 64 && name.Trim().Contains(' ') &&
@@ -17,7 +18,7 @@ public sealed record QuestObjective(uint QuestId, string QuestName, bool IsMainS
     uint LevelId, int TodoIndex, byte CompleteSequence, uint TerritoryId, uint MapId,
     Vector3 Position, string NpcName)
 {
-    public string Key => $"{QuestId}/{TodoIndex}/{LevelId}";
+    public string Key => string.Create(CultureInfo.InvariantCulture, $"{QuestId}/{TodoIndex}/{LevelId}");
     public string Label => TodoIndex < 0 ? "Quest giver" : $"Objective {TodoIndex + 1}";
     public bool IsValid => QuestId != 0 && LevelId != 0 && TerritoryId != 0 && MapId != 0 &&
         !string.IsNullOrWhiteSpace(QuestName) && IsFinite(Position);

@@ -1,8 +1,16 @@
 # Story Lens
 
-Quest objective overlays, session-only story-progress clues for visible players, and saved last-seen points for members you track. Version 1.0.0.0, API 15 / `Dalamud.NET.Sdk/15.0.0`. Maintained as an active workspace plugin with release/staging compatibility checks. Historical verification notes below retain their status at the time; the promotion record supersedes those incubator labels.
+**Status: active / maintained.** [Download version 1.0.1](https://github.com/Matuno/StoryLens/releases/tag/v1.0.1).
+
+Quest objective overlays, session-only story-progress clues for visible players, and saved last-seen points for members you track. Version 1.0.1.0, API 15 / `Dalamud.NET.Sdk/15.0.0`. Maintained as an active workspace plugin with release/staging compatibility checks. Historical verification notes below retain their status at the time; the promotion record supersedes those incubator labels.
 
 Public repository: [Matuno/StoryLens](https://github.com/Matuno/StoryLens). The canonical live-development copy is `projects/active/StoryLens` in the sibling Dalamud workspace. Future changes must synchronize shared source, tests, manifest and behavioral documentation before a user-requested push; this checkout retains its standalone build setup. Workspace maintenance leaves changes local for review. Player records, credentials, research fixtures and build artifacts stay outside the repository.
+
+## Development review (2026-10-27)
+
+Lodestone parsing runs off the game thread and unload asynchronously drains its cancellable worker. Profile/roster validation rejects wrong owners, duplicates and incomplete entries while preserving earlier evidence. Saved identifiers are culture-independent, and progress explanations use the client's quest names. The FC list draws visible rows only; marker labels and lookups avoid repeated work. Configuration schema and tracking behavior are unchanged; debug defaults off.
+
+All 99 tests, release/staging builds and package checks pass. Installed-data checks pass in English, German, French and Japanese; the plugin's own UI labels remain English. The updated DLL passed exact-hash live reload, smoke tests, targeted log checks and FC-list/context-menu/selection UI checks. See [CONTRACT.md](CONTRACT.md) for evidence and remaining checks.
 
 ## Active promotion (2026-10-20)
 
@@ -12,7 +20,7 @@ A clean standalone export also passed locked restores, Release packaging and all
 
 ## Start using it
 
-1. Build the plugin using the instructions below. In Dalamud's settings, add the full path to `bin/Release/StoryLens.dll` as a **Dev Plugin Location**, enable it and load Story Lens.
+1. Download `latest.zip` from the [release page](https://github.com/Matuno/StoryLens/releases/latest) and extract it to a permanent local folder, or build from source below. In Dalamud's settings, add the full path to the extracted `StoryLens.dll` (or `bin/Release/StoryLens.dll` when building) as a **Dev Plugin Location**, enable it and load Story Lens. Keep the included manifest and deps file beside the DLL.
 2. Open `/storylens`, or right-click a player and choose **Story Lens** to open **Follow player** on them. This works across standard player context menus that provide a valid name/home world, including players without observations yet. Repeated use keeps following that player; it does not toggle them off or add them to the saved list. Use **Evidence & tracking** to save them explicitly.
 3. **Free Company** is the passive overview: search members and compare rough progress and last-observed times. Click a member to open their path.
 4. **Follow player** starts with **Possible quests**: a scrollable list of observed MSQ and sidequest candidates, showing recent versus earlier clues, possible steps, observations, timestamps and how many quests share each clue. Click a candidate to center its path of three earlier/five upcoming quests; click it again to clear. Choose an FC member, tracked player or someone observed this session; **Monitor target** or **Add a player by name** also saves that player.
@@ -129,7 +137,7 @@ The 2026-10-15 sweep-speed follow-up passed 63 tests, including combat/duty and 
 
 The subsequent retry-policy change passed 64 tests, including missing/expired/short/long server deadlines, locked release/staging builds and exact-DLL live validation with zero targeted errors. Live smoke reports a 10-minute default retry and five-second request spacing. The existing 15:49:23 UTC deadline remains honored; a new live failure/retry cycle was not forced. Scraper/API research is recorded in EVIDENCE.md; no new service was connected.
 
-The initial sweep remains incomplete. No game restart, personal visual UI review or comparison against every member's actual quest log was performed. Old ARR catalog branches, stale/private profiles, replay and area-only evidence remain estimation limits. The plugin remains an incubator.
+The initial sweep remains incomplete. No game restart, personal visual UI review or comparison against every member's actual quest log was performed. Old ARR catalog branches, stale/private profiles, replay and area-only evidence remain estimation limits. This check predates promotion to active status.
 
 ## Development and licensing
 
@@ -143,7 +151,7 @@ Version 0.3.0.0 adds the FC overview, a player-focused quest path, quest summari
 
 All 68 managed tests pass, including clear/resume selection, pinned previews, current versus historical objective matches, shared-step ambiguity and future-evidence rejection. The actual catalog loaded all 5,373 quest detail sheets without exceptions; every location retained its objective index, all four resolved icon assets exist, and representative MSQ/unlock/side quest text plus Divine Intervention's known objective text passed checks. The work and standalone Release builds passed without warnings/errors. The standalone package was built outside OneDrive after its existing output directory refused removal; the source needed no build workaround. The final 0.3.0.0 live reload matched its built DLL hash/MVID (SHA-256 c3b6b3070b288372e817928601761ce1e8fcbbe05a5d9f8b444c89b7d7c0ba07), passed the read-only smoke test and had zero targeted log errors on Dalamud 15.0.3.8.
 
-Visual checks in the running game covered the FC overview, opening a member's path, quest text and MSQ icons, independent quest previews, and clearing a preview by clicking it again. The empty details pane stayed cleared, with following available explicitly; nearby MSQ world icons returned. The user stopped Computer Use with Escape before the clear-player click could be verified. Final title-bar styling and automatic scrolling to the path anchor are loaded and pass smoke checks but have not been visually rechecked. A fresh observed player advancing through objectives, blue/normal world icons, every DPI setting and a game restart were not exercised. These limits do not change the incubator status.
+Visual checks in the running game covered the FC overview, opening a member's path, quest text and MSQ icons, independent quest previews, and clearing a preview by clicking it again. The empty details pane stayed cleared, with following available explicitly; nearby MSQ world icons returned. The user stopped Computer Use with Escape before the clear-player click could be verified. Final title-bar styling and automatic scrolling to the path anchor are loaded and pass smoke checks but have not been visually rechecked. A fresh observed player advancing through objectives, blue/normal world icons, every DPI setting and a game restart were not exercised. These checks predate the active promotion recorded above.
 
 ### Objective numbering and map links (2026-10-18)
 
@@ -155,4 +163,4 @@ The top of Follow player now exposes recent and earlier quest candidates, their 
 
 83 managed tests pass. The real catalog probe validated 5,373 quest detail sheets and 471 distinct linked duties, including all 16 duty icon assets, Sastasha's dungeon icon and Tower cutscene references. Debug/live and standalone Release builds pass without warnings/errors. Final exact-DLL live reload and read-only smoke pass on Dalamud 15.0.3.8 with no targeted log errors (SHA-256 945416780eb8317c57253706d588e43de283cc7cd42e2b7a12bcf4e62cafc963). The redacted report is `.workspace/storylens-uncertainty-validation.txt` in the development workspace.
 
-Live visual checks covered alternative candidate selection, moving the path, clicking again to deselect, restored world markers, opening a new quest at its summary, and the Tower of Zot name/icon beneath its path card. Existing evidence showed shared cutscene locations as multiple alternatives. A controlled remote combat transition, quest-spawned monster attribution, every DPI/window size, and a full game restart were not exercised. Combat continuity and saved-evidence merging are covered by deterministic tests. Debug defaults off; incubator/experimental status is unchanged.
+Live visual checks covered alternative candidate selection, moving the path, clicking again to deselect, restored world markers, opening a new quest at its summary, and the Tower of Zot name/icon beneath its path card. Existing evidence showed shared cutscene locations as multiple alternatives. A controlled remote combat transition, quest-spawned monster attribution, every DPI/window size, and a full game restart were not exercised. Combat continuity and saved-evidence merging are covered by deterministic tests. Debug defaults off. These checks predate the active promotion recorded above.

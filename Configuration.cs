@@ -5,5 +5,5 @@ namespace StoryLens;
 
 internal sealed class Configuration : ConfigurationData, IPluginConfiguration
 {
-    public void Validate(QuestCatalog catalog) => base.Validate(catalog.Worlds.Select(w => w.Id).ToHashSet());
+    public void Validate(QuestCatalog catalog) => base.Validate(catalog.WorldIds);
 }
